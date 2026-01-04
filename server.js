@@ -37,6 +37,10 @@ function makeFailure(reasonCode, message, extra = {}) {
   return { ok: false, reasonCode, message, ...extra };
 }
 
+function sendFailure(res, status, reasonCode, message, extra = {}) {
+  return res.status(status).json(makeFailure(reasonCode, message, extra));
+}
+
 async function validate1920x1080(buffer) {
   const meta = await sharp(buffer).metadata();
   return meta.width === 1920 && meta.height === 1080;
@@ -184,13 +188,18 @@ async function processResizeJob({ jobId, fallback }) {
 }
 
 // Routes
+app.get('/healthz', (req, res) => {
+  const hasToken = !!(process.env.HF_TOKEN && !process.env.HF_TOKEN.includes('YOUR_TOKEN'));
+  res.json({ ok: true, service: 'ai-resizer-1920x1080', hasToken });
+});
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'resizer.html'));
 });
 
 app.get('/api/jobs/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId);
-  if (!job) return res.status(404).json(makeFailure('NOT_FOUND', 'Job not found (expired or invalid).'));
+  if (!job) return sendFailure(res, 404, 'NOT_FOUND', 'Job not found (expired or invalid).');
 
   res.json({
     ok: true,
@@ -209,7 +218,7 @@ app.post('/api/resize-only', upload.single('image'), async (req, res) => {
   cleanupJobs();
 
   const file = req.file;
-  if (!file) return res.status(400).json(makeFailure('NO_IMAGE', 'No image uploaded'));
+  if (!file) return sendFailure(res, 400, 'NO_IMAGE', 'No image uploaded');
 
   const fallback = String(req.body.fallback || 'false') === 'true';
   const prompt = (req.body.prompt || 'cinematic background extension, seamless, photoreal').toString();
@@ -246,7 +255,7 @@ app.post('/api/resize-only', upload.single('image'), async (req, res) => {
 app.post('/api/jobs/:jobId/retry', async (req, res) => {
   const jobId = req.params.jobId;
   const job = jobs.get(jobId);
-  if (!job) return res.status(404).json(makeFailure('NOT_FOUND', 'Job not found (expired or invalid).'));
+  if (!job) return sendFailure(res, 404, 'NOT_FOUND', 'Job not found (expired or invalid).');
 
   const fallback = String(req.query.fallback || 'false') === 'true';
   job.retryCount += 1;

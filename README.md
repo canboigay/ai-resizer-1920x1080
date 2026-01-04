@@ -1,62 +1,40 @@
 # AI Resizer 1920×1080 (HF Outpainting)
-A standalone, AI-first image resizer that outputs **exactly 1920×1080**.
-It tries Hugging Face outpainting first, and only returns an image if the AI succeeds.
-Optionally, you can enable a deterministic fallback (always returns 1920×1080) if AI fails.
+AI-first resizer that outputs **exactly 1920×1080**.
+If the AI fails, it returns a JSON error with a reason and a `jobId` for retry (5-minute in-memory TTL). You can opt into a deterministic fallback.
 
-## What this does
-- Upload any image
-- Server requests an AI outpaint/resize via Hugging Face
-- If AI succeeds and output validates as 1920×1080 → returns PNG
-- If AI fails → returns a JSON error with a reason + a `jobId`
-- In-memory queue supports retry for 5 minutes (no re-upload needed)
-
-## Requirements
-- Node.js 18+
-- Python 3.10+
-- A Hugging Face token with access to the Inference API
-
-## Setup
-1) Install dependencies & start:
-```bash
-./start.sh
-```
-2) Create `.env`:
+## Quickstart
+1) Create `.env`:
 ```bash
 cp .env.example .env
 ```
-3) Edit `.env` and set:
+2) Set your Hugging Face token in `.env`:
 - `HF_TOKEN=...`
-
-## Run
-Open:
+3) Start:
+```bash
+./start.sh
+```
+4) Open:
 - http://localhost:3002
 
 ## API
-### POST /api/resize-only
-multipart/form-data:
-- `image` (file)
-- `fallback` (optional, set to `true`)
-- `prompt` (optional)
+- `POST /api/resize-only` (multipart: `image`, optional `prompt`, optional `fallback=true`)
+- `POST /api/jobs/:jobId/retry?fallback=true|false`
+- `GET /api/jobs/:jobId`
+- `GET /healthz`
 
-Success:
-- `200 image/png`
-- `X-Job-Id: <jobId>`
+## Limits
+- Upload limit: 25MB
+- Job TTL: 5 minutes
 
-AI Failure (no fallback):
-- `502 application/json`
-```json
-{"ok":false,"jobId":"...","reasonCode":"HF_FAILED","message":"...","retryAfterSeconds":10}
+## Docker
+Build:
+```bash
+docker build -t ai-resizer-1920x1080 .
 ```
-
-### POST /api/jobs/:jobId/retry?fallback=true|false
-Retries the last upload stored in memory.
-
-### GET /api/jobs/:jobId
-Returns status and last failure reason.
-
-## Notes
-- Jobs expire after 5 minutes.
-- Max upload size is 25MB.
+Run:
+```bash
+docker run --rm -p 3002:3002 -e HF_TOKEN=hf_your_token_here ai-resizer-1920x1080
+```
 
 ## License
 MIT
