@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Image Resizer (1920x1080)</title>
+  <style>
+    :root {
+      --primary: #00ff99;
+      --bg: #0a0a0a;
+      --panel: #141414;
+      --text: #eee;
+    }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    h1 { 
+        text-align: center; 
+        color: var(--primary); 
+        text-transform: uppercase; 
+        letter-spacing: 2px;
+        margin-bottom: 20px;
+    }
+    .container {
+      background: var(--panel);
+      padding: 30px;
+      border-radius: 12px;
+      border: 1px solid #333;
+    }
+    .form-group { margin-bottom: 20px; }
+    label { display: block; margin-bottom: 8px; font-weight: 600; color: #ccc;}
+    input[type="file"] {
+      width: 100%;
+      padding: 15px;
+      background: #222;
+      border-radius: 6px;
+      border: 1px dashed #555;
+    }
+    button {
+      width: 100%;
+      padding: 18px;
+      background: var(--primary);
+      color: #000;
+      font-weight: 800;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1.3em;
+      text-transform: uppercase;
+      margin-top: 10px;
+    }
+    button:hover { opacity: 0.9; }
+    
+    #result { margin-top: 40px; text-align: center; }
+    img { 
+        max-width: 100%; 
+        border: 2px solid var(--primary); 
+        border-radius: 4px; 
+        display: none; 
+    }
+    .loading-container {
+        display: none;
+        margin: 20px 0;
+        color: var(--primary);
+        font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>AI Outpainting Resizer</h1>
+  <p style="text-align: center; color: #888; margin-bottom: 30px;">
+      Upload any image. AI will extend the background to fit exactly 1920x1080.
+  </p>
+  
+  <div class="container">
+    <form id="resizeForm">
+      <div class="form-group">
+        <label for="image">Select Image</label>
+        <input type="file" id="image" name="image" accept="image/*" required>
+      </div>
+
+      <div class="form-group" style="background:#111; border:1px solid #333; padding:12px; border-radius:8px;">
+        <label style="display:flex; gap:10px; align-items:center; cursor:pointer;">
+          <input type="checkbox" id="fallback" name="fallback" value="true" style="width:18px; height:18px;">
+          <span style="color:#ccc;">Fallback if AI fails (always returns 1920×1080)</span>
+        </label>
+        <div style="color:#666; font-size:0.9em; margin-top:6px;">
+          If unchecked, the request fails with a reason and you can retry.
+        </div>
+      </div>
+
+      <button type="submit">RESIZE TO 1920x1080</button>
+    </form>
+  </div>
+
+  <div id="result">
+    <div class="loading-container">
+        AI is processing... (HF can take 10–60s)
+    </div>
+
+    <div id="errorBox" style="display:none; margin:18px 0; padding:12px; background:#1a0f0f; border:1px solid #552222; border-radius:8px; color:#ffb3b3; text-align:left;"></div>
+
+    <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:10px 0;">
+      <button id="retryBtn" type="button" style="display:none; width:auto; padding:12px 18px; font-size:1em; background:#333; color:var(--primary); border:1px solid var(--primary);">Retry AI</button>
+    </div>
+
+    <img id="outputImage" alt="Resized Image" />
+    <br/><br/>
+    <a id="downloadLink" href="#" download="resized_1920x1080.png" style="display:none; color: var(--primary);">DOWNLOAD</a>
+  </div>
+
+  <script>
+    const form = document.getElementById('resizeForm');
+    const outputImage = document.getElementById('outputImage');
+    const downloadLink = document.getElementById('downloadLink');
+    const loading = document.querySelector('.loading-container');
+    const errorBox = document.getElementById('errorBox');
+    const retryBtn = document.getElementById('retryBtn');
+
+    let lastJobId = null;
+
+    function resetUI() {
+      outputImage.style.display = 'none';
+      downloadLink.style.display = 'none';
+      errorBox.style.display = 'none';
+      errorBox.textContent = '';
+      retryBtn.style.display = 'none';
+    }
+
+    async function showImageFromResponse(response) {
+      const blob = await response.blob();
+      const imageUrl = URL.createObjectURL(blob);
+      outputImage.src = imageUrl;
+      outputImage.style.display = 'inline-block';
+      downloadLink.href = imageUrl;
+      downloadLink.style.display = 'inline-block';
+
+      const jobId = response.headers.get('X-Job-Id');
+      if (jobId) lastJobId = jobId;
+
+      const fallbackUsed = response.headers.get('X-AI-Fallback-Used') === 'true';
+      if (fallbackUsed) {
+        const reason = response.headers.get('X-AI-Failure-Reason') || 'UNKNOWN';
+        errorBox.style.display = 'block';
+        errorBox.textContent = `AI failed (${reason}). Returned fallback resize.`;
+      }
+    }
+
+    async function submitNew() {
+      resetUI();
+      loading.style.display = 'block';
+
+      const formData = new FormData(form);
+
+      try {
+        const response = await fetch('/api/resize-only', { method: 'POST', body: formData });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          const reason = data?.reasonCode || 'FAILED';
+          const msg = data?.message || 'Resizing failed.';
+          lastJobId = data?.jobId || null;
+
+          errorBox.style.display = 'block';
+          errorBox.textContent = `${reason}: ${msg}`;
+
+          if (lastJobId) {
+            retryBtn.style.display = 'inline-block';
+          }
+          return;
+        }
+
+        await showImageFromResponse(response);
+      } finally {
+        loading.style.display = 'none';
+      }
+    }
+
+    async function retryJob() {
+      if (!lastJobId) return;
+
+      resetUI();
+      loading.style.display = 'block';
+
+      const fallback = document.getElementById('fallback').checked;
+
+      try {
+        const response = await fetch(`/api/jobs/${lastJobId}/retry?fallback=${fallback ? 'true' : 'false'}`, {
+          method: 'POST',
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          const reason = data?.reasonCode || 'FAILED';
+          const msg = data?.message || 'Retry failed.';
+
+          errorBox.style.display = 'block';
+          errorBox.textContent = `${reason}: ${msg}`;
+          retryBtn.style.display = 'inline-block';
+          return;
+        }
+
+        await showImageFromResponse(response);
+      } finally {
+        loading.style.display = 'none';
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await submitNew();
+    });
+
+    retryBtn.addEventListener('click', async () => {
+      await retryJob();
+    });
+  </script>
+</body>
+</html>
